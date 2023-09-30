@@ -51,10 +51,11 @@ def imgs_to_npz():
         npz.append(img_arr)
 
     output_npz = np.array(npz)
-    np.savez('cifar10_train.npz', output_npz)
+    # np.savez('cifar10_train.npz', output_npz)
+    np.savez('/export/home1/NoCsBack/working/tingyu/adm/cifar10_train.npz', output_npz)
     print(f"{output_npz.shape} size array saved into cifar10_train.npz")  # (50000, 32, 32, 3)
 
 
 if __name__ == "__main__":
     main()
-    # imgs_to_npz()
+    imgs_to_npz()

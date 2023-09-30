@@ -169,6 +169,7 @@ class GaussianDiffusion:
         self.posterior_variance = (
             betas * (1.0 - self.alphas_cumprod_prev) / (1.0 - self.alphas_cumprod)
         )
+
         # log calculation clipped because the posterior variance is 0 at the
         # beginning of the diffusion chain.
         self.posterior_log_variance_clipped = np.log(
@@ -184,6 +185,15 @@ class GaussianDiffusion:
         )
         self.input_pertub = input_pertub
         logger.log(f"input perturbation is: {self.input_pertub}")
+
+        ###############
+        self.posterior_variance_all = (self.all_betas * (1.0 - self.alphas_cumprod_prev_all) / (1.0 - self.alphas_cumprod_all))
+
+        self.posterior_log_variance_clipped_all = np.log(
+            np.append(self.posterior_variance_all[1], self.posterior_variance_all[1:])
+        )
+        self.sqrt_recip_alphas_cumprod_all = np.sqrt(1.0 / self.alphas_cumprod_all)
+        self.sqrt_recipm1_alphas_cumprod_all = np.sqrt(1.0 / self.alphas_cumprod_all - 1)
 
     def q_mean_variance(self, x_start, t):
         """
@@ -275,19 +285,31 @@ class GaussianDiffusion:
         B, C = x.shape[:2]
         assert t.shape == (B,)
 
+        import ipdb
+        ipdb.set_trace()
+
         model_output = model(x, self._scale_timesteps(t), **model_kwargs)
+
+        ipdb.set_trace()
 
         if self.model_var_type in [ModelVarType.LEARNED, ModelVarType.LEARNED_RANGE]:
             assert model_output.shape == (B, C * 2, *x.shape[2:])
             model_output, model_var_values = th.split(model_output, C, dim=1)
+
             if self.model_var_type == ModelVarType.LEARNED:
                 model_log_variance = model_var_values
                 model_variance = th.exp(model_log_variance)
             else:
-                min_log = _extract_into_tensor(
+                if self.do_time_shift:
+                    min_log = _extract_into_tensor(
+                    self.posterior_log_variance_clipped_all, t, x.shape
+                    )
+                    max_log = _extract_into_tensor(np.log(self.all_betas), t, x.shape)
+                else:
+                    min_log = _extract_into_tensor(
                     self.posterior_log_variance_clipped, t, x.shape
-                )
-                max_log = _extract_into_tensor(np.log(self.betas), t, x.shape)
+                    )
+                    max_log = _extract_into_tensor(np.log(self.betas), t, x.shape)
                 # The model_var_values is [-1, 1] for [min_var, max_var].
                 frac = (model_var_values + 1) / 2
                 model_log_variance = frac * max_log + (1 - frac) * min_log
@@ -307,13 +329,14 @@ class GaussianDiffusion:
             }[self.model_var_type]
             model_variance = _extract_into_tensor(model_variance, t, x.shape)
             model_log_variance = _extract_into_tensor(model_log_variance, t, x.shape)
-
+        
         def process_xstart(x):
             if denoised_fn is not None:
                 x = denoised_fn(x)
             if clip_denoised:
                 return x.clamp(-1, 1)
             return x
+
 
         if self.model_mean_type == ModelMeanType.PREVIOUS_X:
             pred_xstart = process_xstart(
@@ -327,9 +350,16 @@ class GaussianDiffusion:
                 pred_xstart = process_xstart(
                     self._predict_xstart_from_eps(x_t=x, t=t, eps=model_output)
                 )
-            model_mean, _, _ = self.q_posterior_mean_variance(
+            
+            
+            ipdb.set_trace()
+
+            if self.do_time_shift:
+                model_mean=pred_xstart
+            else:
+                model_mean, _, _ = self.q_posterior_mean_variance(
                 x_start=pred_xstart, x_t=x, t=t
-            )
+                )
         else:
             raise NotImplementedError(self.model_mean_type)
 
@@ -344,11 +374,19 @@ class GaussianDiffusion:
         }
 
     def _predict_xstart_from_eps(self, x_t, t, eps):
+        import ipdb
+        ipdb.set_trace()
         assert x_t.shape == eps.shape
-        return (
-            _extract_into_tensor(self.sqrt_recip_alphas_cumprod, t, x_t.shape) * x_t
-            - _extract_into_tensor(self.sqrt_recipm1_alphas_cumprod, t, x_t.shape) * eps
-        )
+        if self.do_time_shift:
+            return (
+            _extract_into_tensor(self.sqrt_recip_alphas_cumprod_all, t, x_t.shape) * x_t
+            - _extract_into_tensor(self.sqrt_recipm1_alphas_cumprod_all, t, x_t.shape) * eps
+            )
+        else:
+            return (
+                _extract_into_tensor(self.sqrt_recip_alphas_cumprod, t, x_t.shape) * x_t
+                - _extract_into_tensor(self.sqrt_recipm1_alphas_cumprod, t, x_t.shape) * eps
+            )
 
     def _predict_xstart_from_xprev(self, x_t, t, xprev):
         assert x_t.shape == xprev.shape
@@ -361,10 +399,16 @@ class GaussianDiffusion:
         )
 
     def _predict_eps_from_xstart(self, x_t, t, pred_xstart):
-        return (
-            _extract_into_tensor(self.sqrt_recip_alphas_cumprod, t, x_t.shape) * x_t
-            - pred_xstart
-        ) / _extract_into_tensor(self.sqrt_recipm1_alphas_cumprod, t, x_t.shape)
+        if self.do_time_shift:
+            return (
+                _extract_into_tensor(self.sqrt_recip_alphas_cumprod_all, t, x_t.shape) * x_t
+                - pred_xstart
+            ) / _extract_into_tensor(self.sqrt_recipm1_alphas_cumprod_all, t, x_t.shape)
+        else:
+            return (
+                _extract_into_tensor(self.sqrt_recip_alphas_cumprod, t, x_t.shape) * x_t
+                - pred_xstart
+            ) / _extract_into_tensor(self.sqrt_recipm1_alphas_cumprod, t, x_t.shape)
 
     def _scale_timesteps(self, t):
         if self.rescale_timesteps:
@@ -569,37 +613,45 @@ class GaussianDiffusion:
 
         Same usage as p_sample().
         """
-        out = self.p_mean_variance(
-            model,
-            x,
-            t,
-            clip_denoised=clip_denoised,
-            denoised_fn=denoised_fn,
-            model_kwargs=model_kwargs,
-        )
-        if cond_fn is not None:
-            out = self.condition_score(cond_fn, out, x, t, model_kwargs=model_kwargs)
 
-        # Usually our model outputs epsilon, but we re-derive it
-        # in case we used x_start or x_prev prediction.
-        eps = self._predict_eps_from_xstart(x, t, out["pred_xstart"])
+        # out = self.p_mean_variance(
+        #     model,
+        #     x,
+        #     t,
+        #     clip_denoised=clip_denoised,
+        #     denoised_fn=denoised_fn,
+        #     model_kwargs=model_kwargs,
+        # )
+        # if cond_fn is not None:
+        #     out = self.condition_score(cond_fn, out, x, t, model_kwargs=model_kwargs)
 
+        # # Usually our model outputs epsilon, but we re-derive it
+        # # in case we used x_start or x_prev prediction.
+        # eps = self._predict_eps_from_xstart(x, t, out["pred_xstart"])
+        
         if not self.do_time_shift:
             alpha_bar = _extract_into_tensor(self.alphas_cumprod, t, x.shape)
             alpha_bar_prev = _extract_into_tensor(self.alphas_cumprod_prev, t, x.shape)
         else:
             if len(xs) > 1:
                 next_t = self.get_next_time_window(current_time=t, window=self.window, xs=xs, cutoff=self.cutoff)
+                import ipdb
+                ipdb.set_trace()
                 # alpha_bar = _extract_into_tensor(self.alphas_cumprod_all, next_t, x.shape)
                 alpha_bar = _extract_into_tensor(self.alphas_cumprod, t, x.shape)
                 # if int(next_t[0])-len(self.alphas_cumprod_prev_all) // (self.alphas_cumprod.shape[0]) > 0:
                 if int(self.timestep_map[t[0]]) > self.cutoff:
+                    print(next_t, self.timestep_map[t[0]], self.cutoff)
                     alpha_bar_prev = _extract_into_tensor(self.alphas_cumprod_prev_all, next_t-len(self.alphas_cumprod_prev_all) // (self.alphas_cumprod.shape[0]-1) , x.shape)
                 else:
+                    print(next_t, self.timestep_map[t[0]])
                     alpha_bar_prev = _extract_into_tensor(self.alphas_cumprod_prev, t, x.shape)
+                ipdb.set_trace()
             else:
                 alpha_bar = _extract_into_tensor(self.alphas_cumprod, t, x.shape)
                 alpha_bar_prev = _extract_into_tensor(self.alphas_cumprod_prev, t, x.shape)
+
+                next_t =  th.tensor(self.timestep_map[t[0]], dtype=t.dtype, device=t.device).expand_as(t)
 
 
         sigma = (
@@ -608,20 +660,22 @@ class GaussianDiffusion:
             * th.sqrt(1 - alpha_bar / alpha_bar_prev)
         )
 
-        # out = self.p_mean_variance(
-        #     model,
-        #     x,
-        #     next_t,
-        #     clip_denoised=clip_denoised,
-        #     denoised_fn=denoised_fn,
-        #     model_kwargs=model_kwargs,
-        # )
-        # if cond_fn is not None:
-        #     out = self.condition_score(cond_fn, out, x, next_t, model_kwargs=model_kwargs)
 
-        # # Usually our model outputs epsilon, but we re-derive it
-        # # in case we used x_start or x_prev prediction.
-        # eps = self._predict_eps_from_xstart(x, next_t, out["pred_xstart"])
+        out = self.p_mean_variance(
+            model,
+            x,
+            next_t,
+            clip_denoised=clip_denoised,
+            denoised_fn=denoised_fn,
+            model_kwargs=model_kwargs,
+        )
+        if cond_fn is not None:
+            out = self.condition_score(cond_fn, out, x, next_t, model_kwargs=model_kwargs)
+
+        # Usually our model outputs epsilon, but we re-derive it
+        # in case we used x_start or x_prev prediction.
+        eps = self._predict_eps_from_xstart(x, next_t, out["pred_xstart"])
+
 
         # Equation 12.
         noise = th.randn_like(x)
@@ -646,6 +700,8 @@ class GaussianDiffusion:
             next_time_list = self.all_timesteps[0:window+1]
         next_time_list = th.tensor([next_time_list]*current_time.size()[0], device=current_time.device)
 
+        import ipdb
+        ipdb.set_trace()
         x_pre = xs[-1]
         var = th.var(x_pre.view(x_pre.size()[0],-1),dim=-1)
         var = var.reshape(-1,1)
@@ -665,7 +721,7 @@ class GaussianDiffusion:
             next_t = n_t
         else:
             next_t = th.tensor(current_timestep, dtype=n_t.dtype, device=n_t.device).expand_as(n_t)
-
+        ipdb.set_trace()
         return next_t
 
     def ddim_reverse_sample(
@@ -992,7 +1048,9 @@ def _extract_into_tensor(arr, timesteps, broadcast_shape):
                             dimension equal to the length of timesteps.
     :return: a tensor of shape [batch_size, 1, ...] where the shape has K dims.
     """
+
     res = th.from_numpy(arr).to(device=timesteps.device)[timesteps].float()
+
     while len(res.shape) < len(broadcast_shape):
         res = res[..., None]
     return res.expand(broadcast_shape)

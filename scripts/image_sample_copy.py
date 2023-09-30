@@ -9,8 +9,8 @@ import os
 import numpy as np
 import torch as th
 import torch.distributed as dist
-
-from guided_diffusion import dist_util, logger
+import torch 
+from guided_diffusion import dist_util_copy, logger
 from guided_diffusion.script_util import (
     NUM_CLASSES,
     model_and_diffusion_defaults,
@@ -23,7 +23,7 @@ from guided_diffusion.script_util import (
 def main():
     args = create_argparser().parse_args()
 
-    dist_util.setup_dist()
+    dist_util_copy.setup_dist()
     logger.configure()
 
     logger.log("creating model and diffusion...")
@@ -32,11 +32,11 @@ def main():
     )
     model_path = args.model_path
     model.load_state_dict(
-        dist_util.load_state_dict(model_path, map_location="cpu")
+        dist_util_copy.load_state_dict(model_path, map_location="cpu")
     )
     logger.log(f"loading checkpoint: {model_path}")
     logger.log(f"timesteps: {args.timestep_respacing}")
-    model.to(dist_util.dev())
+    model.to(dist_util_copy.dev())
     if args.use_fp16:
         model.convert_to_fp16()
     model.eval()
@@ -48,7 +48,7 @@ def main():
         model_kwargs = {}
         if args.class_cond:
             classes = th.randint(
-                low=0, high=NUM_CLASSES, size=(args.batch_size,), device=dist_util.dev()
+                low=0, high=NUM_CLASSES, size=(args.batch_size,), device=dist_util_copy.dev()
             )
             model_kwargs["y"] = classes
         sample_fn = (
@@ -60,6 +60,38 @@ def main():
             clip_denoised=args.clip_denoised,
             model_kwargs=model_kwargs,
         )
+        
+        # starter, ender = th.cuda.Event(enable_timing=True),th.cuda.Event(enable_timing=True)
+        # for i in range(50):
+        #     sample = sample_fn(
+        #     model,
+        #     (args.batch_size, 3, args.image_size, args.image_size),
+        #     clip_denoised=args.clip_denoised,
+        #     model_kwargs=model_kwargs,
+        #     )
+        # torch.cuda.synchronize()
+        # times = th.zeros(300)
+        
+        # with torch.no_grad():
+        #     for i in range(100):
+        #         starter.record()
+        #         sample = sample_fn(
+        #             model,
+        #             (args.batch_size, 3, args.image_size, args.image_size),
+        #             clip_denoised=args.clip_denoised,
+        #             model_kwargs=model_kwargs,
+        #         )
+        #         ender.record()
+        #         th.cuda.synchronize()
+        #         curr_time = starter.elapsed_time(ender)
+        #         times[i] = curr_time
+        # mean_time = times.mean().item()
+        # print("Inference time: {:.6f}, FPS: {}".format(mean_time, 1000/mean_time))
+        # import ipdb 
+        # ipdb.set_trace()
+
+
+
         sample = ((sample + 1) * 127.5).clamp(0, 255).to(th.uint8)
         sample = sample.permute(0, 2, 3, 1)
         sample = sample.contiguous()

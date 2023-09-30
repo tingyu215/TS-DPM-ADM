@@ -1,3 +1,6 @@
 .DS_Store
 __pycache__/
 classify_image_graph_def.pb
+datasets/cifar_test
+datasets/cifar_train
+*.sh

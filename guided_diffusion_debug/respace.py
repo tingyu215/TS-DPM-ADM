@@ -84,12 +84,16 @@ class SpacedDiffusion(GaussianDiffusion):
                 new_betas.append(1 - alpha_cumprod / last_alpha_cumprod)
                 last_alpha_cumprod = alpha_cumprod
                 self.timestep_map.append(i)
-        self.all_timesteps = list(np.flip(base_diffusion.alphas_cumprod_all))
+
+        # self.all_timesteps = list(np.flip(base_diffusion.alphas_cumprod_all))
+        self.all_timesteps = list(1-(base_diffusion.alphas_cumprod_all))
         kwargs["betas"] = np.array(new_betas)
         kwargs["all_betas"] = all_betas
         kwargs["window"] = window
         kwargs["cutoff"] = cutoff
         kwargs["do_time_shift"] = do_time_shift
+
+        self.do_time_shift = do_time_shift
 
         super().__init__(**kwargs)
 
@@ -113,7 +117,7 @@ class SpacedDiffusion(GaussianDiffusion):
         if isinstance(model, _WrappedModel):
             return model
         return _WrappedModel(
-            model, self.timestep_map, self.rescale_timesteps, self.original_num_steps, self.all_timesteps,
+            model, self.timestep_map, self.rescale_timesteps, self.original_num_steps, self.all_timesteps, self.do_time_shift
         )
 
     def _scale_timesteps(self, t):
@@ -122,18 +126,26 @@ class SpacedDiffusion(GaussianDiffusion):
 
 
 class _WrappedModel:
-    def __init__(self, model, timestep_map, rescale_timesteps, original_num_steps, all_timesteps):
+    def __init__(self, model, timestep_map, rescale_timesteps, original_num_steps, all_timesteps, do_time_shift):
         self.model = model
         self.timestep_map = timestep_map
         self.rescale_timesteps = rescale_timesteps
         self.original_num_steps = original_num_steps
         self.all_timesteps = all_timesteps
 
+        self.do_time_shift = do_time_shift
+
     def __call__(self, x, ts, **kwargs):
         map_tensor = th.tensor(self.timestep_map, device=ts.device, dtype=ts.dtype)
-        new_ts = map_tensor[ts]
-        if self.rescale_timesteps:
-            new_ts = new_ts.float() * (1000.0 / self.original_num_steps)
+        # import ipdb
+        # ipdb.set_trace()
+        if not self.do_time_shift:
+            new_ts = map_tensor[ts]
+            if self.rescale_timesteps:
+                new_ts = new_ts.float() * (1000.0 / self.original_num_steps)
+        else:
+            new_ts = ts
+        # print(ts, new_ts)
         # import ipdb
         # ipdb.set_trace()
         return self.model(x, new_ts, **kwargs)

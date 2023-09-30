@@ -26,8 +26,12 @@ FID_SPATIAL_NAME = "mixed_6/conv:0"
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("ref_batch", help="path to reference batch npz file")
-    parser.add_argument("sample_batch", help="path to sample batch npz file")
+    parser.add_argument("--ref_batch", help="path to reference batch npz file")
+    parser.add_argument("--sample_batch", help="path to sample batch npz file")
+    parser.add_argument("--use_fid_file", action='store_true')
+    parser.add_argument("--fid_file1_dir")
+    parser.add_argument("--fid_file2_dir")
+
     args = parser.parse_args()
 
     config = tf.ConfigProto(
@@ -40,9 +44,14 @@ def main():
     # This will cause TF to print a bunch of verbose stuff now rather
     # than after the next print(), to help prevent confusion.
     evaluator.warmup()
-
-    print(f"computing reference batch activations {args.ref_batch}...")
-    ref_acts = evaluator.read_activations(args.ref_batch)
+    if args.use_fid_file:
+        print(f"load pre-computed files from {args.fid_file1_dir} and {args.fid_file2_dir}")
+        lsun_stat1 = np.load(args.fid_file1_dir)
+        lsun_stat2 = np.load(args.fid_file2_dir)
+        ref_acts = (lsun_stat1, lsun_stat2)
+    else:
+        print(f"computing reference batch activations {args.ref_batch}...")
+        ref_acts = evaluator.read_activations(args.ref_batch)
     print("computing/reading reference batch statistics...")
     ref_stats, ref_stats_spatial = evaluator.read_statistics(args.ref_batch, ref_acts)
 
@@ -119,7 +128,7 @@ class Evaluator:
     def __init__(
         self,
         session,
-        batch_size=64,
+        batch_size=128,
         softmax_batch_size=512,
     ):
         self.sess = session
