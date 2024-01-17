@@ -15,20 +15,23 @@ from guided_diffusion.script_util import (
     add_dict_to_argparser,
 )
 from guided_diffusion.train_util import TrainLoop
+import os
 
 
 def main():
     args = create_argparser().parse_args()
-
+    os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu_ids
     dist_util.setup_dist()
-    logger.configure()
+    logger.configure(args.out_dir)
 
     logger.log("creating model and diffusion...")
     model, diffusion = create_model_and_diffusion(
         **args_to_dict(args, model_and_diffusion_defaults().keys())
     )
     model.to(dist_util.dev())
-    logger.log(summary(model, input_size=(3, 64, 64)))
+    # import ipdb
+    # ipdb.set_trace()
+    # logger.log(summary(model, input_size=(3, 64, 64)))
     schedule_sampler = create_named_schedule_sampler(args.schedule_sampler, diffusion)
     logger.log(f"creating data loader from {args.data_dir}...")
 
@@ -62,6 +65,7 @@ def main():
 
 def create_argparser():
     defaults = dict(
+        gpu_ids="0",
         data_dir="",
         schedule_sampler="uniform",
         lr=1e-4,
@@ -76,6 +80,9 @@ def create_argparser():
         use_fp16=False,
         fp16_scale_growth=1e-3,
         input_pertub = 0.0,
+        perturb_schedule_type="linear",
+        perturb_cutoff=0,
+        out_dir="."
     )
     defaults.update(model_and_diffusion_defaults())
     parser = argparse.ArgumentParser()

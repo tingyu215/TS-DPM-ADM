@@ -22,7 +22,7 @@ from guided_diffusion.script_util import (
 
 def main():
     args = create_argparser().parse_args()
-
+    os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu_id
     dist_util_1gpu.setup_dist()
     logger.configure()
 
@@ -107,9 +107,13 @@ def create_argparser():
         window=2,
         cutoff=300,
         do_time_shift=False,
-        out_dir="/export/home1/NoCsBack/working/tingyu/adm",
+        out_dir=".",
         data_type="cifar",
-        model_type="adm"
+        model_type="adm",
+        classifier_scale=1.0,
+        classifier_depth=4,
+        classifier_path=".",
+        gpu_id="0"
     )
     defaults.update(model_and_diffusion_defaults())
     parser = argparse.ArgumentParser()

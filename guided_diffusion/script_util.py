@@ -5,7 +5,7 @@ from . import gaussian_diffusion as gd
 from .respace import SpacedDiffusion, space_timesteps
 from .unet import SuperResModel, UNetModel, EncoderUNetModel
 
-NUM_CLASSES = 10
+NUM_CLASSES = 1000
 
 
 def diffusion_defaults():
@@ -64,6 +64,8 @@ def model_and_diffusion_defaults():
         use_fp16=False,
         use_new_attention_order=False,
         input_pertub=0.0,
+        perturb_schedule_type="linaer",
+        perturb_cutoff=0
     )
     res.update(diffusion_defaults())
     return res
@@ -103,6 +105,8 @@ def create_model_and_diffusion(
     use_fp16,
     use_new_attention_order,
     input_pertub,
+    perturb_schedule_type,
+    perturb_cutoff
 ):
     model = create_model(
         image_size,
@@ -134,7 +138,9 @@ def create_model_and_diffusion(
         rescale_timesteps=rescale_timesteps,
         rescale_learned_sigmas=rescale_learned_sigmas,
         timestep_respacing=timestep_respacing,
-        input_pertub = input_pertub
+        input_pertub = input_pertub,
+        perturb_schedule_type=perturb_schedule_type,
+        perturb_cutoff=perturb_cutoff
     )
     return model, diffusion
 
@@ -427,7 +433,9 @@ def create_gaussian_diffusion(
     rescale_timesteps=False,
     rescale_learned_sigmas=False,
     timestep_respacing="",
-    input_pertub=0.0
+    input_pertub=0.0,
+    perturb_schedule_type="linear",
+    perturb_cutoff=0,
 ):
     betas = gd.get_named_beta_schedule(noise_schedule, steps)
     if use_kl:
@@ -460,6 +468,8 @@ def create_gaussian_diffusion(
         loss_type=loss_type,
         rescale_timesteps=rescale_timesteps,
         input_pertub=input_pertub,
+        perturb_schedule_type=perturb_schedule_type,
+        perturb_cutoff=perturb_cutoff
     )
 
 

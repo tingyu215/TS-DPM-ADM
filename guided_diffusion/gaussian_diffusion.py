@@ -127,7 +127,9 @@ class GaussianDiffusion:
         model_var_type,
         loss_type,
         rescale_timesteps=False,
-        input_pertub=0.0
+        input_pertub=0.0,
+        perturb_schedule_type="linear",
+        perturb_cutoff=0
     ):
         self.all_betas = all_betas
         alphas_all = 1.0 - all_betas
@@ -182,8 +184,31 @@ class GaussianDiffusion:
             * np.sqrt(alphas)
             / (1.0 - self.alphas_cumprod)
         )
-        self.input_pertub = input_pertub
-        logger.log(f"input perturbation is: {self.input_pertub}")
+        # self.input_pertub = input_pertub
+        logger.log(f"max input perturbation is: {input_pertub}")
+        logger.log(f"scheduler for input perturbation is: {perturb_schedule_type}")
+        logger.log(f"cutoff time for input perturbation is: {perturb_cutoff}")
+
+        self.input_pertub = self.prepare_input_perturb(input_pertub, schedule_type=perturb_schedule_type, cutoff=perturb_cutoff)
+
+    def prepare_input_perturb(self, max_input_perturb, schedule_type="linear", cutoff=0):
+        min_input_perturb = 0.01 * max_input_perturb
+        mask = np.array([1] * (1000 - cutoff) + [0] * cutoff)
+
+        if schedule_type == "linear":
+            input_perturbs = np.linspace(
+                min_input_perturb, max_input_perturb, len(self.all_betas), dtype=np.float64
+            )
+            input_perturbs = input_perturbs * mask
+        elif schedule_type == "cosine":
+            input_perturbs = []
+            for i in range(len(self.all_betas)):
+                input_perturbs.append(max_input_perturb* math.cos((i + 0.008) / 1.008 * math.pi / 2) ** 2)
+            input_perturbs = np.array(input_perturbs) * mask
+        else:
+            raise ValueError("unsupported schedule type for input perturbation")
+
+        return input_perturbs
 
     def q_mean_variance(self, x_start, t):
         """
@@ -847,7 +872,13 @@ class GaussianDiffusion:
             model_kwargs = {}
         if noise is None:
             noise = th.randn_like(x_start)
-        new_noise = noise + self.input_pertub * th.randn_like(noise)
+
+        perturb_scale = self.input_pertub[t.cpu().numpy()]
+        perturb_scale = th.tensor(perturb_scale, device=noise.device, dtype=noise.dtype)
+        perturb_scale = perturb_scale.view(noise.shape[0],1,1,1)
+        new_noise = noise + perturb_scale * th.randn_like(noise)
+
+        # new_noise = noise + self.input_pertub * th.randn_like(noise)
         x_t = self.q_sample(x_start, t, noise=new_noise)
 
         terms = {}
